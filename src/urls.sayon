@@ -1,0 +1,103 @@
+# Parts of addresses: percent-encoding (RFC 3986), the query strings and
+# HTML forms of names and values, and joining a base address and a path.
+
+strings = import("standard/strings.sayon")
+
+constant HEX = "0123456789ABCDEF"
+
+# Text with each byte of its UTF-8 but letters, digits, and `-._~` written
+# as `%` and two hexadecimal digits, as a part of an address takes text:
+# `a b/c` is `a%20b%2Fc`.
+function encode(text: string) -> string
+    parts: Array<string> = []
+    for value in strings.bytes(text)
+        code = integer(value)
+        if unreserved(code)
+            push(parts, strings.character(code))
+        else
+            push(parts, "%" + HEX[code / 16] + HEX[code % 16])
+    return strings.join(parts, "")
+
+# Text with each `%` and two hexadecimal digits turned back into the byte
+# they write; the bytes must be UTF-8.
+function decode(text: string) -> string
+    bytes: Array<byte> = []
+    pieces = strings.characters(text)
+    at = 0
+    while at < length(pieces)
+        if pieces[at] == "%"
+            if at + 2 >= length(pieces)
+                error("\"{text}\" ends inside an escape: `%` is followed by two hexadecimal digits")
+            high = digit(pieces[at + 1])
+            low = digit(pieces[at + 2])
+            if high < 0 or low < 0
+                error("\"{text}\" has an escape that is not `%` and two hexadecimal digits")
+            push(bytes, byte(high * 16 + low))
+            at += 3
+        else
+            for value in strings.bytes(pieces[at])
+                push(bytes, value)
+            at += 1
+    return strings.from_bytes(bytes)
+
+# A query string of names and values, in their order, each encoded:
+# `query(["q" = "sayon lang", "page" = "2"])` is `q=sayon%20lang&page=2`.
+function query(fields: Dict<string, string>) -> string
+    parts: Array<string> = []
+    for name, value in fields
+        push(parts, encode(name) + "=" + encode(value))
+    return strings.join(parts, "&")
+
+# An HTML form's body, as `application/x-www-form-urlencoded` writes it: a
+# query string, with spaces as `+`.
+function form(fields: Dict<string, string>) -> string
+    parts: Array<string> = []
+    for name, value in fields
+        push(parts, strings.replace(encode(name), "%20", "+") + "=" + strings.replace(encode(value), "%20", "+"))
+    return strings.join(parts, "&")
+
+# A path joined to a base address with one `/` between them:
+# `join("https://a.example/api/", "/users")` is
+# `https://a.example/api/users`. A path that is an address of its own,
+# starting with `http://` or `https://`, is kept as it is.
+function join(base: string, path: string) -> string
+    if strings.starts_with(path, "http://") or strings.starts_with(path, "https://")
+        return clone(path)
+    if path == ""
+        return clone(base)
+    left = clone(base)
+    while strings.ends_with(left, "/")
+        left = strings.slice(left, 0, length(left) - 1)
+    right = clone(path)
+    while strings.starts_with(right, "/")
+        right = strings.slice(right, 1, length(right))
+    return left + "/" + right
+
+private function unreserved(code: integer) -> boolean
+    letter = code >= 65 and code <= 90 or code >= 97 and code <= 122
+    return letter or code >= 48 and code <= 57 or code == 45 or code == 46 or code == 95 or code == 126
+
+# The value of a hexadecimal digit, or -1 for another character.
+private function digit(character: string) -> integer
+    found = strings.find(HEX, strings.upper(character))
+    if found == nothing or length(character) != 1
+        return -1
+    return found
+
+test "text is encoded and decoded"
+    assert(encode("a b/c") == "a%20b%2Fc" and encode("~safe-_.") == "~safe-_." and encode("é") == "%C3%A9")
+    assert(decode("a%20b%2fc") == "a b/c" and decode("%C3%A9t%C3%A9") == "été" and decode("plain") == "plain")
+    for bad in ["%", "%4", "%zz"]
+        outcome = try decode(bad)
+        assert(outcome is error, bad)
+
+test "queries and forms"
+    assert(query(["q" = "sayon lang", "page" = "2"]) == "q=sayon%20lang&page=2")
+    assert(query(["a&b" = "c=d"]) == "a%26b=c%3Dd")
+    assert(form(["name" = "Ada Lovelace", "note" = "1+1"]) == "name=Ada+Lovelace&note=1%2B1")
+
+test "addresses are joined"
+    assert(join("https://a.example/api/", "/users") == "https://a.example/api/users")
+    assert(join("https://a.example", "users/1?full=yes") == "https://a.example/users/1?full=yes")
+    assert(join("https://a.example/api", "") == "https://a.example/api")
+    assert(join("https://a.example/api", "http://b.example/x") == "http://b.example/x")

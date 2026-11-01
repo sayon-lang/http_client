@@ -1,0 +1,12 @@
+# sayon.lock: the exact packages this project depends on.
+# Written by `sayon install`; do not edit.
+schema = 1
+dependencies = ["json_parser = registry:http://127.0.0.1:4100/index#json_parser@0.1.0"]
+dev_dependencies = []
+
+[[package]]
+source = "registry:http://127.0.0.1:4100/index#json_parser@0.1.0"
+name = "json_parser"
+version = "0.1.0"
+digest = "sha256:9e3c973ed8f9f95d166ce17c5ab8ed61bff019e85233ba8be20eadedf90a1ce3"
+dependencies = []

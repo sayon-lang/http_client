@@ -1,0 +1,39 @@
+# A tour of http_client, against a small notes API that this program serves
+# itself on this computer (examples/notes.sayon). Run it with `sayon run` in
+# this folder.
+
+json = import("standard/json.sayon")
+network = import("standard/network.sayon")
+threads = import("standard/threads.sayon")
+time = import("standard/time.sayon")
+http = import("src/client.sayon")
+notes = import("examples/notes.sayon")
+
+listener = network.listen("127.0.0.1", 0)
+port = listener.address().port
+server = threads.spawn(function()
+    notes.serve(listener)
+)
+
+api = http.new("http://127.0.0.1:{port}")
+api.bearer("a token the notes API ignores")
+api.retry(3, time.milliseconds(100))
+
+first = api.post_json("/notes", json.parse("{{\"text\": \"buy tea\"}}"))
+second = api.post_json("/notes", json.parse("{{\"text\": \"call Ada\"}}"))
+print("made", json.encode(first), "and", json.encode(second))
+
+text = api.get_at("/notes/1", "/text")
+if text != nothing
+    print("the first note says", json.encode(text))
+
+changed = api.patch_json("/notes/2", json.parse("[{{\"op\": \"replace\", \"path\": \"/text\", \"value\": \"call Ada at noon\"}}]"))
+print("changed by a JSON Patch:", json.encode(changed))
+print("every note:", json.encode(api.get_json("/notes")))
+
+missing = try api.get_json("/notes/9")
+if missing is error
+    print("and no ninth:", missing.message)
+
+api.post_json("/stop", json.Json.null)
+threads.join(server)

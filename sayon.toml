@@ -1,0 +1,9 @@
+[package]
+name = "http_client"
+version = "0.1.0"
+entry = "examples/tour.sayon"
+authors = ["Omnifex Studio"]
+description = "An HTTP client for APIs: a base address, shared headers, JSON both ways, query strings and forms, and retries"
+
+[dependencies]
+json_parser = "0.1"

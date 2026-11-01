@@ -1,0 +1,74 @@
+# A small notes API, which the tour serves on this computer so that it needs
+# no network. A note is a JSON object with an `id` and a `text`:
+#
+#     GET /notes          every note, as {"notes": [...]}
+#     POST /notes         a new note, from {"text": ...}
+#     GET /notes/<id>     a note
+#     PATCH /notes/<id>   a note changed by a JSON Patch
+#     POST /stop          ends serving
+
+json = import("standard/json.sayon")
+network = import("standard/network.sayon")
+strings = import("standard/strings.sayon")
+patch = import("dependencies/json_parser/src/patch.sayon")
+
+type Request = [method: string, path: string, body: string]
+
+# Answers requests until one asks for /stop.
+function serve(update listener: network.Listener)
+    notes: Array<json.Json> = []
+    while true
+        connection = listener.accept()
+        request = read_request(connection)
+        if request.path == "/stop"
+            respond(connection, 200, "{{}}")
+            connection.close()
+            return
+        outcome = try answer(request, notes)
+        if outcome is error
+            respond(connection, 400, json.encode(json.Json.object(["error" = json.Json.text(outcome.message)])))
+        else
+            respond(connection, outcome.status, outcome.body)
+        connection.close()
+
+type Answer = [status: integer, body: string]
+
+private function answer(request: Request, update notes: Array<json.Json>) -> Answer
+    if request.path == "/notes" and request.method == "GET"
+        return Answer(status = 200, body = json.encode(json.Json.object(["notes" = json.Json.list(clone(notes))])))
+    if request.path == "/notes" and request.method == "POST"
+        text = json.field(json.parse(request.body), "text")
+        if text == nothing
+            error("a note needs a \"text\"")
+        made = json.Json.object(["id" = json.from_integer(length(notes) + 1), "text" = text])
+        push(notes, clone(made))
+        return Answer(status = 201, body = json.encode(made))
+    if strings.starts_with(request.path, "/notes/")
+        id = try strings.parse_integer(strings.slice(request.path, 7, length(request.path)))
+        if id is error or id < 1 or id > length(notes)
+            return Answer(status = 404, body = "{{\"error\": \"there is no note {request.path}\"}}")
+        if request.method == "PATCH"
+            notes[id - 1] = patch.apply(notes[id - 1], json.parse(request.body))
+        return Answer(status = 200, body = json.encode(notes[id - 1]))
+    return Answer(status = 404, body = "{{\"error\": \"there is nothing at {request.path}\"}}")
+
+private function read_request(update connection: network.Connection) -> Request
+    line = connection.read_line()
+    words = ["", ""]
+    if line != nothing
+        words = strings.split(line, " ")
+    size = 0
+    while true
+        field = connection.read_line()
+        if field == nothing or field == ""
+            break
+        if strings.starts_with(strings.lower(field), "content-length:")
+            size = strings.parse_integer(strings.trim(strings.slice(field, 15, length(field))))
+    body = strings.from_bytes(connection.read_exactly(size))
+    return Request(method = clone(words[0]), path = clone(words[1]), body = body)
+
+private function respond(update connection: network.Connection, status: integer, body: string)
+    reasons = [200 = "OK", 201 = "Created", 400 = "Bad Request", 404 = "Not Found"]
+    connection.write("HTTP/1.1 {status} {reasons[status]}\r\ncontent-type: application/json\r\ncontent-length: {bytelength(body)}\r\nconnection: close\r\n\r\n")
+    connection.write(body)
+    connection.flush()

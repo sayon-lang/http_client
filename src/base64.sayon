@@ -1,0 +1,84 @@
+# Base64 (RFC 4648): bytes written with 64 characters, four for every three
+# bytes, with `=` filling out the last four.
+
+strings = import("standard/strings.sayon")
+
+constant ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+# The bytes in base64.
+function encode(bytes: Array<byte>) -> string
+    parts: Array<string> = []
+    count = length(bytes)
+    for at in range(0, count, 3)
+        first = integer(bytes[at])
+        second = 0
+        third = 0
+        if at + 1 < count
+            second = integer(bytes[at + 1])
+        if at + 2 < count
+            third = integer(bytes[at + 2])
+        group = first * 65536 + second * 256 + third
+        push(parts, ALPHABET[group / 262144])
+        push(parts, ALPHABET[group / 4096 % 64])
+        if at + 1 < count
+            push(parts, ALPHABET[group / 64 % 64])
+        else
+            push(parts, "=")
+        if at + 2 < count
+            push(parts, ALPHABET[group % 64])
+        else
+            push(parts, "=")
+    return strings.join(parts, "")
+
+# Text's UTF-8 in base64.
+function encode_text(text: string) -> string
+    return encode(strings.bytes(text))
+
+# The bytes that base64 text writes, which comes in groups of four
+# characters, with `=` only at its end; spaces and line breaks between them
+# are left out.
+function decode(text: string) -> Array<byte>
+    values: Dict<string, integer> = []
+    for position in range(length(ALPHABET))
+        values[ALPHABET[position]] = position
+    kept: Array<string> = []
+    for character in text
+        if character != " " and character != "\n" and character != "\r" and character != "\t"
+            push(kept, character)
+    if length(kept) % 4 != 0
+        error("base64 comes in groups of four characters, so {length(kept)} cannot be it")
+    bytes: Array<byte> = []
+    for at in range(0, length(kept), 4)
+        group = 0
+        padding = 0
+        for offset in range(4)
+            piece = clone(kept[at + offset])
+            if piece == "=" and at + 4 == length(kept) and offset >= 2
+                padding += 1
+                group = group * 64
+            elseif padding == 0 and haskey(values, piece)
+                group = group * 64 + values[piece]
+            else
+                error("\"{piece}\" cannot be at character {at + offset} of base64")
+        push(bytes, byte(group / 65536))
+        if padding < 2
+            push(bytes, byte(group / 256 % 256))
+        if padding < 1
+            push(bytes, byte(group % 256))
+    return bytes
+
+test "the examples of RFC 4648"
+    pairs = ["" = "", "f" = "Zg==", "fo" = "Zm8=", "foo" = "Zm9v", "foob" = "Zm9vYg==", "fooba" = "Zm9vYmE=", "foobar" = "Zm9vYmFy"]
+    for text, written in pairs
+        assert(encode_text(text) == written, text)
+        assert(strings.from_bytes(decode(written)) == text, written)
+
+test "every byte comes back"
+    bytes: Array<byte> = []
+    for value in range(256)
+        push(bytes, byte(value))
+    assert(decode(encode(bytes)) == bytes)
+    assert(decode("Zm9v\r\nYmFy") == strings.bytes("foobar"))
+    for bad in ["Zm9", "Zm=v", "Z===", "Zm9v!A=="]
+        outcome = try decode(bad)
+        assert(outcome is error, bad)

@@ -1,0 +1,39 @@
+# Searches a Sayon package registry for packages, as `sayon search` does:
+# by default the registry on this computer, which `sayon run -- --port 4100`
+# in packages.sayon-lang.org starts. Run it with
+# `sayon run examples/registry.sayon -- json`, and give another registry's
+# API after the words: `-- json https://registry.example/api/v1`.
+
+json = import("standard/json.sayon")
+os = import("standard/os.sayon")
+time = import("standard/time.sayon")
+pointer = import("dependencies/json_parser/src/pointer.sayon")
+http = import("src/client.sayon")
+
+arguments = os.arguments()
+words = ""
+if length(arguments) > 0
+    words = clone(arguments[0])
+address = "http://127.0.0.1:4100/api/v1"
+if length(arguments) > 1
+    address = clone(arguments[1])
+
+registry = http.new(address)
+registry.retry(2, time.milliseconds(200))
+found = registry.get_json("/search", ["q" = clone(words), "limit" = "20"])
+packages = pointer.get(found, "/packages")
+count = 0
+if packages != nothing
+    match packages
+        case json.Json.list(items)
+            for item in items
+                name = pointer.get(item, "/name")
+                latest = pointer.get(item, "/latest")
+                description = pointer.get(item, "/description")
+                if name != nothing and latest != nothing and description != nothing
+                    print("{json.text_value(name)} = \"{json.text_value(latest)}\"  # {json.text_value(description)}")
+                    count += 1
+        case _
+            print("{address} did not answer with a list of packages")
+if count == 0
+    print("no packages in {address} match \"{words}\"")

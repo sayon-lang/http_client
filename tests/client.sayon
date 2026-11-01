@@ -1,0 +1,169 @@
+# The client against a server of the test's own on this computer, which
+# answers with the request it read, fails on purpose, and asks to be tried
+# again.
+
+json = import("standard/json.sayon")
+network = import("standard/network.sayon")
+strings = import("standard/strings.sayon")
+threads = import("standard/threads.sayon")
+time = import("standard/time.sayon")
+pointer = import("dependencies/json_parser/src/pointer.sayon")
+http = import("src/client.sayon")
+
+type Request = [method: string, target: string, headers: Dict<string, string>, body: string]
+
+# A request: its line, its headers with lowercase names, and its body.
+function read_request(update connection: network.Connection) -> Request
+    line = connection.read_line()
+    words: Array<string> = []
+    if line != nothing
+        words = strings.split(line, " ")
+    headers: Dict<string, string> = []
+    while true
+        field = connection.read_line()
+        if field == nothing or field == ""
+            break
+        colon = strings.find(field, ":")
+        if colon != nothing
+            headers[strings.lower(strings.trim(strings.slice(field, 0, colon)))] = strings.trim(strings.slice(field, colon + 1, length(field)))
+    body = ""
+    if haskey(headers, "content-length")
+        body = strings.from_bytes(connection.read_exactly(strings.parse_integer(headers["content-length"])))
+    return Request(method = clone(words[0]), target = clone(words[1]), headers = headers, body = body)
+
+function respond(update connection: network.Connection, status: string, headers: Array<string>, body: string)
+    connection.write("HTTP/1.1 {status}\r\ncontent-length: {bytelength(body)}\r\nconnection: close\r\n")
+    for header in headers
+        connection.write(header + "\r\n")
+    connection.write("\r\n" + body)
+    connection.flush()
+
+# Answers requests until one asks for /stop: /echo with the request as
+# JSON, /flaky with 503 twice before it succeeds, /limited with 429 and
+# `Retry-After: 0` once, /busy with 503 always, /empty with nothing, /text
+# with text that is not JSON, and anything else with 404.
+function serve(update listener: network.Listener)
+    counts: Dict<string, integer> = []
+    while true
+        connection = listener.accept()
+        request = read_request(connection)
+        path = clone(request.target)
+        mark = strings.find(path, "?")
+        if mark != nothing
+            path = strings.slice(path, 0, mark)
+        before = 0
+        if haskey(counts, path)
+            before = counts[path]
+        counts[clone(path)] = before + 1
+        tries = before + 1
+        if path == "/stop"
+            respond(connection, "200 OK", [], "")
+            connection.close()
+            return
+        elseif path == "/echo"
+            fields: Dict<string, json.Json> = []
+            for name, value in request.headers
+                fields[clone(name)] = json.Json.text(clone(value))
+            echo = json.Json.object(["method" = json.Json.text(clone(request.method)), "target" = json.Json.text(clone(request.target)), "headers" = json.Json.object(fields), "body" = json.Json.text(clone(request.body))])
+            respond(connection, "200 OK", ["content-type: application/json"], json.encode(echo))
+        elseif path == "/flaky" and tries < 3
+            respond(connection, "503 Service Unavailable", [], "busy")
+        elseif path == "/limited" and tries == 1
+            respond(connection, "429 Too Many Requests", ["retry-after: 0"], "slow down")
+        elseif path == "/flaky" or path == "/limited"
+            respond(connection, "200 OK", ["content-type: application/json"], "{{\"tries\": {tries}}}")
+        elseif path == "/busy"
+            respond(connection, "503 Service Unavailable", [], "busy {tries}")
+        elseif path == "/empty"
+            respond(connection, "204 No Content", [], "")
+        elseif path == "/text"
+            respond(connection, "200 OK", ["content-type: text/plain"], "not JSON at all")
+        else
+            respond(connection, "404 Not Found", ["content-type: application/json"], "{{\"error\": \"there is no {path}\"}}")
+        connection.close()
+
+# The text at a place in an answer, or "" when it has none there.
+function text_at(value: json.Json, place: string) -> string
+    found = pointer.get(value, place)
+    if found != nothing
+        text = json.text_value(found)
+        if text != nothing
+            return text
+    return ""
+
+test "requests carry the client's address, query, headers, and JSON"
+    listener = network.listen("127.0.0.1", 0)
+    base = "http://127.0.0.1:{listener.address().port}/"
+    server = threads.spawn(function()
+        serve(listener)
+    )
+    client = http.new(base)
+    client.bearer("t0ken")
+    client.header("X-Trace", "7")
+    echoed = client.get_json("/echo", ["q" = "a b", "page" = "2"])
+    assert(text_at(echoed, "/method") == "GET" and text_at(echoed, "/target") == "/echo?q=a%20b&page=2")
+    assert(text_at(echoed, "/headers/authorization") == "Bearer t0ken" and text_at(echoed, "/headers/x-trace") == "7")
+    assert(text_at(echoed, "/headers/accept") == "application/json")
+    posted = client.post_json("/echo", json.parse("{{\"name\": \"Ada\"}}"))
+    assert(text_at(posted, "/method") == "POST" and text_at(posted, "/body") == "{{\"name\":\"Ada\"}}")
+    assert(text_at(posted, "/headers/content-type") == "application/json")
+    patched = client.patch_json("/echo", json.parse("[{{\"op\": \"remove\", \"path\": \"/a\"}}]"))
+    assert(text_at(patched, "/method") == "PATCH" and text_at(patched, "/headers/content-type") == "application/json-patch+json")
+    put = client.put_json("/echo", json.Json.null)
+    assert(text_at(put, "/method") == "PUT" and text_at(put, "/body") == "null")
+    method = client.get_at("/echo", "/method")
+    assert(method != nothing and method == json.Json.text("GET") and client.get_at("/echo", "/nowhere") == nothing)
+    form = client.post_form("/echo", ["name" = "Ada Lovelace", "lang" = "sayon"])
+    sent = json.parse(form.text())
+    assert(text_at(sent, "/body") == "name=Ada+Lovelace&lang=sayon")
+    assert(text_at(sent, "/headers/content-type") == "application/x-www-form-urlencoded")
+    deleted = client.delete("/echo")
+    assert(deleted.status == 200 and text_at(json.parse(deleted.text()), "/method") == "DELETE")
+    signed = http.new(base)
+    signed.basic_auth("Aladdin", "open sesame")
+    # RFC 7617's example.
+    assert(text_at(signed.get_json("echo"), "/headers/authorization") == "Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==")
+    client.get("/stop")
+    threads.join(server)
+
+test "answers that are no success, or no JSON, are errors"
+    listener = network.listen("127.0.0.1", 0)
+    base = "http://127.0.0.1:{listener.address().port}"
+    server = threads.spawn(function()
+        serve(listener)
+    )
+    client = http.new(base)
+    missing = try client.get_json("/missing")
+    assert(missing is error and strings.contains(missing.message, "answered 404 Not Found: {{\"error\": \"there is no /missing\"}}"))
+    text = try client.get_json("/text")
+    assert(text is error and strings.contains(text.message, "did not answer with JSON"))
+    assert(client.post_json("/empty", json.Json.null) == json.Json.null)
+    assert(client.get("/missing").status == 404)
+    client.get("/stop")
+    threads.join(server)
+
+test "requests are tried again when the server is busy"
+    listener = network.listen("127.0.0.1", 0)
+    base = "http://127.0.0.1:{listener.address().port}"
+    server = threads.spawn(function()
+        serve(listener)
+    )
+    client = http.new(base)
+    client.retry(3, time.milliseconds(5))
+    assert(client.get_json("/flaky") == json.parse("{{\"tries\": 3}}"))
+    assert(client.get_json("/limited") == json.parse("{{\"tries\": 2}}"))
+    # A POST is made once, since repeating it could do it twice.
+    once = try client.post_json("/busy", json.Json.null)
+    assert(once is error and strings.contains(once.message, "busy 1"))
+    thrice = try client.get_json("/busy")
+    assert(thrice is error and strings.contains(thrice.message, "busy 4"))
+    # Without `retry`, a request is made once.
+    single = http.new(base)
+    assert(single.get("/busy").status == 503)
+    client.get("/stop")
+    threads.join(server)
+    # A server that is not there fails after every try.
+    gone = http.new(base)
+    gone.retry(2, time.milliseconds(5))
+    unreachable = try gone.get("/echo")
+    assert(unreachable is error)

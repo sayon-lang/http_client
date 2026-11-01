@@ -1,0 +1,164 @@
+# An HTTP client for an API at one address. Its requests share the base
+# address, headers such as `Authorization`, a timeout, and how often a
+# request is tried again. JSON goes both ways as standard/json's `Json`,
+# and json_parser's JSON Pointer finds a value in an answer.
+
+json = import("standard/json.sayon")
+math = import("standard/math.sayon")
+network = import("standard/network.sayon")
+strings = import("standard/strings.sayon")
+time = import("standard/time.sayon")
+pointer = import("dependencies/json_parser/src/pointer.sayon")
+base64 = import("src/base64.sayon")
+urls = import("src/urls.sayon")
+
+# A client: where its API is, the headers every request sends, how long a
+# request waits for its answer, and how often and after how long a request
+# is tried again.
+type Client = [base: string, headers: Dict<string, string>, timeout: time.Duration, attempts: integer, pause: time.Duration]
+
+# A client of the API at an address. Each request waits 30 seconds at most
+# for its answer and is made once; `retry` lets requests be tried again.
+function new(base: string) -> Client
+    headers: Dict<string, string> = []
+    return Client(base = clone(base), headers = headers, timeout = time.seconds(30), attempts = 1, pause = time.milliseconds(250))
+
+# Sends a header with every request.
+function client_header(update client: Client, name: string, value: string)
+    client.headers[clone(name)] = clone(value)
+
+# Sends a user name and password with every request, by HTTP's Basic
+# authentication (RFC 7617). The password travels as it is, so send it only
+# to an `https://` address.
+function client_basic_auth(update client: Client, user: string, password: string)
+    client_header(client, "Authorization", "Basic " + base64.encode_text(user + ":" + password))
+
+# Sends a token with every request, as `Authorization: Bearer <token>`.
+function client_bearer(update client: Client, token: string)
+    client_header(client, "Authorization", "Bearer " + token)
+
+# How long each request waits for its answer.
+function client_timeout(update client: Client, timeout: time.Duration)
+    client.timeout = timeout
+
+# Tries a request again, up to `attempts` times in all, when it cannot
+# connect or the server answers 429, 502, 503, or 504, but only a request
+# that changes nothing more when it is repeated: GET, HEAD, PUT, DELETE, or
+# OPTIONS. It waits `pause` before the second try and twice as long before
+# each next one, or as long as the server's `Retry-After` asks, a minute at
+# most.
+function client_retry(update client: Client, attempts: integer, pause: time.Duration)
+    if attempts < 1
+        error("a request is made at least once, not {attempts} times")
+    client.attempts = attempts
+    client.pause = pause
+
+# The answer to a request: its method, a path joined to the base address,
+# a query added to it, headers besides the client's own, and a body. An
+# answer with a failing status, such as 404, is an answer too; a request
+# that cannot be made at all, or every try of it, raises the error.
+function client_send(client: Client, method: string, path: string, query: Dict<string, string> = [], headers: Dict<string, string> = [], body: Array<byte> = []) -> network.Response
+    address = urls.join(client.base, path)
+    if length(query) > 0
+        joining = "?"
+        if strings.contains(address, "?")
+            joining = "&"
+        address = address + joining + urls.query(query)
+    sent = clone(client.headers)
+    for name, value in headers
+        sent[clone(name)] = clone(value)
+    tries = 1
+    if repeatable(method)
+        tries = client.attempts
+    attempt = 1
+    wait = client.pause
+    while true
+        outcome = try network.request(method, address, sent, body, client.timeout)
+        if outcome is error
+            if attempt >= tries
+                raise(outcome)
+        else
+            if attempt >= tries or not busy(outcome.status)
+                return outcome
+            asked = retry_after(outcome)
+            if asked != nothing
+                wait = asked
+        time.sleep(wait)
+        wait = time.scale(wait, 2)
+        attempt += 1
+
+function client_get(client: Client, path: string, query: Dict<string, string> = []) -> network.Response
+    return client_send(client, "GET", path, query)
+
+function client_delete(client: Client, path: string) -> network.Response
+    return client_send(client, "DELETE", path)
+
+# Posts an HTML form's fields, as a browser does.
+function client_post_form(client: Client, path: string, fields: Dict<string, string>) -> network.Response
+    return client_send(client, "POST", path, [], ["Content-Type" = "application/x-www-form-urlencoded"], strings.bytes(urls.form(fields)))
+
+# The JSON a GET answers with. An answer whose status is not a success, or
+# that is not JSON, raises an error that says so, with the start of what
+# the server said.
+function client_get_json(client: Client, path: string, query: Dict<string, string> = []) -> json.Json
+    return answer(client_send(client, "GET", path, query, ["Accept" = "application/json"]), "GET")
+
+# The value at a JSON Pointer in the JSON a GET answers with, or nothing
+# when the answer has nothing there: `client.get_at("/users/1", "/name")`.
+function client_get_at(client: Client, path: string, place: string, query: Dict<string, string> = []) -> json.Json or nothing
+    return pointer.get(client_get_json(client, path, query), place)
+
+# Posts JSON, and reads the JSON answer; no answer at all, as with 204, is
+# null.
+function client_post_json(client: Client, path: string, value: json.Json) -> json.Json
+    return client_send_json(client, "POST", path, value)
+
+# Puts JSON, and reads the JSON answer.
+function client_put_json(client: Client, path: string, value: json.Json) -> json.Json
+    return client_send_json(client, "PUT", path, value)
+
+# Changes a document with a JSON Patch (RFC 6902), which json_parser's
+# patch module applies too, sent with PATCH as
+# `application/json-patch+json`, and reads the JSON answer.
+function client_patch_json(client: Client, path: string, operations: json.Json) -> json.Json
+    headers = ["Accept" = "application/json", "Content-Type" = "application/json-patch+json"]
+    return answer(client_send(client, "PATCH", path, [], headers, strings.bytes(json.encode(operations))), "PATCH")
+
+# Sends JSON with a method, and reads the JSON answer.
+function client_send_json(client: Client, method: string, path: string, value: json.Json) -> json.Json
+    headers = ["Accept" = "application/json", "Content-Type" = "application/json"]
+    return answer(client_send(client, method, path, [], headers, strings.bytes(json.encode(value))), method)
+
+private function answer(response: network.Response, method: string) -> json.Json
+    text = strings.from_bytes_lossy(response.body)
+    if not response.succeeded()
+        shown = strings.trim(text)
+        if length(shown) > 200
+            shown = strings.slice(shown, 0, 200) + "..."
+        error("{method} {response.url} answered {response.status} {response.reason}: {shown}")
+    if strings.trim(text) == ""
+        return json.Json.null
+    parsed = try json.parse(text)
+    if parsed is error
+        error("{method} {response.url} did not answer with JSON: {parsed.message}")
+    return parsed
+
+private function repeatable(method: string) -> boolean
+    named = strings.upper(method)
+    return named == "GET" or named == "HEAD" or named == "PUT" or named == "DELETE" or named == "OPTIONS"
+
+private function busy(status: integer) -> boolean
+    return status == 429 or status == 502 or status == 503 or status == 504
+
+# How long an answer's `Retry-After` asks to wait, in whole seconds, a
+# minute at most; nothing for an answer without one, or with a date.
+private function retry_after(response: network.Response) -> time.Duration or nothing
+    given = response.header("Retry-After")
+    if given == nothing
+        return nothing
+    parsed = try strings.parse_integer(strings.trim(given))
+    if parsed is error
+        return nothing
+    if parsed < 0
+        return nothing
+    return time.seconds(math.min(parsed, 60))
