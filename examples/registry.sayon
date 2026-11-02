@@ -1,6 +1,6 @@
 # Searches a Sayon package registry for packages, as `sayon search` does:
 # by default the registry on this computer, which `sayon run -- --port 4100`
-# in packages.sayon-lang.org starts. Run it with
+# in www.sayon-lang.org, Sayon's website, starts. Run it with
 # `sayon run examples/registry.sayon -- json`, and give another registry's
 # API after the words: `-- json https://registry.example/api/v1`.
 
