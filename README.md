@@ -1,10 +1,10 @@
 # http_client
 
-An HTTP client for APIs, for [Sayon](https://github.com/sayon-lang/sayon), written in Sayon on `standard/network.sayon`'s requests. A client keeps an API's base address and the headers every request sends, such as a token; sends and reads JSON; builds query strings and forms; and tries a request again when the server is busy.
+A small HTTP client for talking to web APIs from [Sayon](https://github.com/sayon-lang/sayon), written in Sayon on top of `standard/network.sayon`. You give a client the API's base address and the headers every request needs, like a token. It sends and reads JSON, builds query strings and forms, and tries again when the server is busy.
 
 ## Using it
 
-Add it to a project's `sayon.toml`, and run `sayon install`, which fetches [json_parser](https://github.com/sayon-lang/json_parser) with it:
+Add it to your project's `sayon.toml` and run `sayon install`, which also fetches [json_parser](https://github.com/sayon-lang/json_parser):
 
 ```toml
 [dependencies]
@@ -35,11 +35,11 @@ made = api.post_json("/notes", json.parse("{{\"text\": \"buy tea\"}}"))
 | `src/urls.sayon` | `encode` and `decode` (percent-encoding, RFC 3986), `query` and `form` (a query string, an HTML form's body), and `join` (a base address and a path). |
 | `src/base64.sayon` | `encode`, `encode_text`, and `decode` (RFC 4648). |
 
-A client tries a request again only when repeating it changes nothing more: GET, HEAD, PUT, DELETE, and OPTIONS, when the connection fails or the server answers 429, 502, 503, or 504, waiting twice as long each time, or as long as the server's `Retry-After` asks, a minute at most.
+A client only retries requests that are safe to repeat: GET, HEAD, PUT, DELETE, and OPTIONS. It retries when the connection fails or the server answers 429, 502, 503, or 504, waiting twice as long each time, or as long as the server's `Retry-After` asks, up to a minute.
 
 ## Examples
 
-`sayon run` in this folder takes a tour against a small notes API that the example serves itself, `examples/notes.sayon`, so it needs no network. `sayon run examples/registry.sayon -- json` searches a Sayon package registry, the one on this computer unless another API's address follows the words.
+`sayon run` in this folder takes a tour against a small notes API that the example serves itself (`examples/notes.sayon`), so it doesn't need the network. `sayon run examples/registry.sayon -- json` searches a Sayon package registry: the one on your own computer, unless you put another API's address after the words.
 
 ## Tests
 
