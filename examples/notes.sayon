@@ -1,11 +1,13 @@
-# A small notes API, which the tour serves on this computer so that it needs
-# no network. A note is a JSON object with an `id` and a `text`:
-#
-#     GET /notes          every note, as {"notes": [...]}
-#     POST /notes         a new note, from {"text": ...}
-#     GET /notes/<id>     a note
-#     PATCH /notes/<id>   a note changed by a JSON Patch
-#     POST /stop          ends serving
+##
+A small notes API, which the tour serves on this computer so that it needs
+no network. A note is a JSON object with an `id` and a `text`:
+
+    GET /notes          every note, as {"notes": [...]}
+    POST /notes         a new note, from {"text": ...}
+    GET /notes/<id>     a note
+    PATCH /notes/<id>   a note changed by a JSON Patch
+    POST /stop          ends serving
+##
 
 json = import("standard/json.sayon")
 network = import("standard/network.sayon")

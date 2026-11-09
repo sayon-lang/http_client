@@ -1,8 +1,10 @@
-# Searches a Sayon package registry for packages, as `sayon search` does:
-# by default the registry on this computer, which `sayon run -- --port 4100`
-# in www.sayon-lang.org, Sayon's website, starts. Run it with
-# `sayon run examples/registry.sayon -- json`, and give another registry's
-# API after the words: `-- json https://registry.example/api/v1`.
+##
+Searches a Sayon package registry for packages, as `sayon search` does:
+by default the registry on this computer, which `sayon run -- --port 4100`
+in www.sayon-lang.org, Sayon's website, starts. Run it with
+`sayon run examples/registry.sayon -- json`, and give another registry's
+API after the words: `-- json https://registry.example/api/v1`.
+##
 
 json = import("standard/json.sayon")
 os = import("standard/os.sayon")

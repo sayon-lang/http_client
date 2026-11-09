@@ -1,6 +1,8 @@
-# A tour of http_client, against a small notes API that this program serves
-# itself on this computer (examples/notes.sayon). Run it with `sayon run` in
-# this folder.
+##
+A tour of http_client, against a small notes API that this program serves
+itself on this computer (examples/notes.sayon). Run it with `sayon run` in
+this folder.
+##
 
 json = import("standard/json.sayon")
 network = import("standard/network.sayon")

@@ -1,6 +1,8 @@
-# The client against a server of the test's own on this computer, which
-# answers with the request it read, fails on purpose, and asks to be tried
-# again.
+##
+The client against a server of the test's own on this computer, which
+answers with the request it read, fails on purpose, and asks to be tried
+again.
+##
 
 json = import("standard/json.sayon")
 network = import("standard/network.sayon")
@@ -38,10 +40,12 @@ function respond(update connection: network.Connection, status: string, headers:
     connection.write("\r\n" + body)
     connection.flush()
 
-# Answers requests until one asks for /stop: /echo with the request as
-# JSON, /flaky with 503 twice before it succeeds, /limited with 429 and
-# `Retry-After: 0` once, /busy with 503 always, /empty with nothing, /text
-# with text that is not JSON, and anything else with 404.
+##
+Answers requests until one asks for /stop: /echo with the request as
+JSON, /flaky with 503 twice before it succeeds, /limited with 429 and
+`Retry-After: 0` once, /busy with 503 always, /empty with nothing, /text
+with text that is not JSON, and anything else with 404.
+##
 function serve(update listener: network.Listener)
     counts: Dict<string, integer> = []
     while true

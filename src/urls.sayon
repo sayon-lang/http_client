@@ -1,13 +1,17 @@
-# Parts of addresses: percent-encoding (RFC 3986), the query strings and
-# HTML forms of names and values, and joining a base address and a path.
+##
+Parts of addresses: percent-encoding (RFC 3986), the query strings and
+HTML forms of names and values, and joining a base address and a path.
+##
 
 strings = import("standard/strings.sayon")
 
 constant HEX = "0123456789ABCDEF"
 
-# Text with each byte of its UTF-8 but letters, digits, and `-._~` written
-# as `%` and two hexadecimal digits, as a part of an address takes text:
-# `a b/c` is `a%20b%2Fc`.
+##
+Text with each byte of its UTF-8 but letters, digits, and `-._~` written
+as `%` and two hexadecimal digits, as a part of an address takes text:
+`a b/c` is `a%20b%2Fc`.
+##
 function encode(text: string) -> string
     parts: Array<string> = []
     for value in strings.bytes(text)
@@ -18,8 +22,10 @@ function encode(text: string) -> string
             push(parts, "%" + HEX[code / 16] + HEX[code % 16])
     return strings.join(parts, "")
 
-# Text with each `%` and two hexadecimal digits turned back into the byte
-# they write; the bytes must be UTF-8.
+##
+Text with each `%` and two hexadecimal digits turned back into the byte
+they write; the bytes must be UTF-8.
+##
 function decode(text: string) -> string
     bytes: Array<byte> = []
     pieces = strings.characters(text)
@@ -40,26 +46,32 @@ function decode(text: string) -> string
             at += 1
     return strings.from_bytes(bytes)
 
-# A query string of names and values, in their order, each encoded:
-# `query(["q" = "sayon lang", "page" = "2"])` is `q=sayon%20lang&page=2`.
+##
+A query string of names and values, in their order, each encoded:
+`query(["q" = "sayon lang", "page" = "2"])` is `q=sayon%20lang&page=2`.
+##
 function query(fields: Dict<string, string>) -> string
     parts: Array<string> = []
     for name, value in fields
         push(parts, encode(name) + "=" + encode(value))
     return strings.join(parts, "&")
 
-# An HTML form's body, as `application/x-www-form-urlencoded` writes it: a
-# query string, with spaces as `+`.
+##
+An HTML form's body, as `application/x-www-form-urlencoded` writes it: a
+query string, with spaces as `+`.
+##
 function form(fields: Dict<string, string>) -> string
     parts: Array<string> = []
     for name, value in fields
         push(parts, strings.replace(encode(name), "%20", "+") + "=" + strings.replace(encode(value), "%20", "+"))
     return strings.join(parts, "&")
 
-# A path joined to a base address with one `/` between them:
-# `join("https://a.example/api/", "/users")` is
-# `https://a.example/api/users`. A path that is an address of its own,
-# starting with `http://` or `https://`, is kept as it is.
+##
+A path joined to a base address with one `/` between them:
+`join("https://a.example/api/", "/users")` is
+`https://a.example/api/users`. A path that is an address of its own,
+starting with `http://` or `https://`, is kept as it is.
+##
 function join(base: string, path: string) -> string
     if strings.starts_with(path, "http://") or strings.starts_with(path, "https://")
         return clone(path)

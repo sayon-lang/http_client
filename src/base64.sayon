@@ -1,5 +1,7 @@
-# Base64 (RFC 4648): bytes written with 64 characters, four for every three
-# bytes, with `=` filling out the last four.
+##
+Base64 (RFC 4648): bytes written with 64 characters, four for every three
+bytes, with `=` filling out the last four.
+##
 
 strings = import("standard/strings.sayon")
 
@@ -34,9 +36,11 @@ function encode(bytes: Array<byte>) -> string
 function encode_text(text: string) -> string
     return encode(strings.bytes(text))
 
-# The bytes that base64 text writes, which comes in groups of four
-# characters, with `=` only at its end; spaces and line breaks between them
-# are left out.
+##
+The bytes that base64 text writes, which comes in groups of four
+characters, with `=` only at its end; spaces and line breaks between them
+are left out.
+##
 function decode(text: string) -> Array<byte>
     values: Dict<string, integer> = []
     for position in range(length(ALPHABET))
